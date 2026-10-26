@@ -53,6 +53,11 @@ def centered(label, y, pen=WHITE):
     text(label, (screen.width - width) // 2, y, pen)
 
 
+def footer(label, pen=WHITE):
+    _, height = screen.measure_text(label)
+    centered(label, screen.height - height - 3, pen)
+
+
 def draw_key(x, y):
     box(x + 1, y + 1, 4, 4, INK)
     box(x + 1, y, 3, 3, GOLD)
@@ -112,7 +117,7 @@ def draw_tile(x, y, gx, gy):
 
 def draw_world():
     left = (screen.width - WIDTH * 8) // 2
-    top = 21
+    top = 18
     text("%02d" % game.level, 4, 3, GOLD)
     centered(THEMES[game.theme], 3, MUTED)
     if game.has_key:
@@ -136,7 +141,7 @@ def draw_world():
     draw_player(left + game.player[0] * 8, top + game.player[1] * 8)
     label = notice if notice_ms > 0 else (
         "FIND THE DOOR" if game.has_key else "FIND THE KEY")
-    centered(label, screen.height - 10, GOLD if notice_ms > 0 else MUTED)
+    footer(label, GOLD if notice_ms > 0 else MUTED)
 
 
 def draw_intro():
@@ -148,7 +153,7 @@ def draw_intro():
     centered("Only 3 tiles in sight.", 66, MUTED)
     centered("The rest disappears.", 77, MUTED)
     centered("D-pad: walk", 91)
-    centered("SELECT: BEGIN", 105, GOLD)
+    footer("SELECT: BEGIN", GOLD)
 
 
 def update():

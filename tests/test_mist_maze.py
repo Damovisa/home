@@ -170,7 +170,7 @@ class RuntimeTests(unittest.TestCase):
             pressed=lambda button: button in self.pressed,
             held=lambda button: button in self.held)
         self.screen = Mock(width=160, height=120)
-        self.screen.measure_text.side_effect = lambda text: (len(text) * 5, 8)
+        self.screen.measure_text.side_effect = lambda text: (len(text) * 5, 13)
         self.namespace = {
             "badge": self.badge, "screen": self.screen,
             "font": types.SimpleNamespace(nope=object()),
@@ -283,6 +283,29 @@ class RuntimeTests(unittest.TestCase):
         self.namespace["draw_door"].assert_called_once()
         self.assertNotIn((1, 1), {(c.args[2], c.args[3])
                                  for c in self.namespace["draw_tile"].call_args_list})
+
+    def test_bottom_text_keeps_three_pixel_font_bounds_clearance(self):
+        labels = ("SELECT: BEGIN", "FIND THE KEY", "FIND THE DOOR",
+                  "KEY FOUND!", "NEED THE KEY", "WAY FOUND!", "A NEW WORLD")
+        for label in labels:
+            for height in (13, 15):
+                self.screen.measure_text.side_effect = (
+                    lambda text, h=height: (len(text) * 5, h))
+                self.screen.text.reset_mock()
+                self.namespace["footer"](label)
+                rendered_label, x, y = self.screen.text.call_args.args
+                self.assertEqual(rendered_label, label)
+                self.assertEqual(y + height, self.screen.height - 3)
+                self.assertGreaterEqual(x, 0)
+        self.screen.measure_text.side_effect = lambda text: (len(text) * 5, 13)
+        for state in ("intro", "play", "pause"):
+            self.namespace["state"] = state
+            self.screen.text.reset_mock()
+            self.frame()
+            for call in self.screen.text.call_args_list:
+                label, _, y = call.args
+                self.assertLessEqual(y + 13, self.screen.height - 3,
+                                     (state, label, y))
 
 
 if __name__ == "__main__":
