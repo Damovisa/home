@@ -160,15 +160,52 @@ class MazeTests(unittest.TestCase):
             counts.append(total)
         self.assertEqual(counts, [16, 16, 16])
 
+    def test_speed_bonus_decreases_without_penalty(self):
+        times = (0, 1000, 10000, 30000, 120000, 1000000, 100000000)
+        bonuses = [maze.speed_bonus(ms) for ms in times]
+        self.assertEqual(bonuses[:4], [1000, 909, 500, 250])
+        self.assertEqual(bonuses, sorted(bonuses, reverse=True))
+        self.assertTrue(all(0 <= bonus <= 1000 for bonus in bonuses))
+        self.assertEqual(maze.speed_bonus(-1), 1000)
+
+    def test_separate_bonuses_no_double_award_and_running_total(self):
+        game = maze.Maze()
+        game.advance(10000)
+        for step in route(game, game.player, game.key, locked=True):
+            game.move(*step)
+        self.assertEqual((game.key_bonus, game.stage_ms, game.score),
+                         (500, 0, 500))
+        key_pos = game.player
+        path = route(game, game.player, game.door)
+        game.move(*path[0])
+        game.move(-path[0][0], -path[0][1])
+        self.assertEqual(game.player, key_pos)
+        self.assertEqual(game.score, 500)
+        game.advance(30000)
+        for step in path:
+            game.move(*step)
+        self.assertEqual((game.door_bonus, game.score), (250, 750))
+        game.move(*path[-1])
+        game.advance(50000)
+        self.assertEqual((game.score, game.stage_ms), (750, 30000))
+        game.new_level()
+        self.assertEqual((game.level, game.score, game.stage_ms), (2, 750, 0))
+        self.assertEqual((game.key_bonus, game.door_bonus), (0, 0))
+        self.assertEqual(maze.Maze().score, 0)
+
 
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.pressed = set()
         self.held = set()
+        self.imu = (0, 0, -16000, 0, 0, 0)
+        self.upside_down = False
         self.badge = types.SimpleNamespace(
             ticks_delta=16, mode=Mock(),
             pressed=lambda button: button in self.pressed,
-            held=lambda button: button in self.held)
+            held=lambda button: button in self.held,
+            imu=lambda: self.imu,
+            upside_down=lambda: self.upside_down)
         self.screen = Mock(width=160, height=120)
         self.screen.measure_text.side_effect = lambda text: (len(text) * 5, 13)
         self.namespace = {
@@ -248,7 +285,8 @@ class RuntimeTests(unittest.TestCase):
         button = button_for[path[-1]]
         self.frame(pressed=(button,), held=(button,))
         self.assertTrue(game.has_key)
-        self.assertEqual(self.namespace["notice"], "KEY FOUND!")
+        self.assertEqual(self.namespace["notice"],
+                         "KEY +%d" % game.key_bonus)
         game.has_key = False
         path = route(game, game.player, game.door)
         for step in path[:-1]:
@@ -260,6 +298,70 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(game.player, before)
         self.assertEqual(self.namespace["notice"], "NEED THE KEY")
         self.assertFalse(game.escaped)
+
+    def test_paused_intro_and_transition_time_excluded_from_bonuses(self):
+        game = self.namespace["game"]
+        self.frame(ms=5000)
+        self.assertEqual(game.stage_ms, 0)
+        self.start()
+        self.frame(ms=100)
+        before_pause = game.stage_ms
+        self.frame(pressed=("MENU",), ms=16)
+        self.frame(ms=60000)
+        self.frame(pressed=("BACK",), ms=1000)
+        self.assertEqual(game.stage_ms, before_pause)
+        self.frame(ms=100)
+        self.assertEqual(game.stage_ms, before_pause + 100)
+        game.escaped = True
+        self.namespace["escape_ms"] = 1200
+        self.frame(ms=1199)
+        self.assertEqual(game.stage_ms, before_pause + 100)
+        self.frame(ms=1)
+        self.assertEqual(game.stage_ms, 0)
+
+    def test_select_toggles_motion_without_changing_intro_or_reset(self):
+        self.start()
+        self.assertFalse(self.namespace["motion_mode"])
+        self.frame(pressed=("SELECT",))
+        self.assertTrue(self.namespace["motion_mode"])
+        self.assertEqual(self.namespace["notice"], "TILT: HOLD STILL")
+        self.frame(pressed=("SELECT",), held=("RIGHT",))
+        self.assertFalse(self.namespace["motion_mode"])
+        self.assertFalse(self.namespace["repeat"].ready)
+        self.frame(pressed=("SELECT",))
+        self.frame(pressed=("MENU",))
+        self.frame(pressed=("DOWN",))
+        self.frame(pressed=("SELECT",))
+        self.assertFalse(self.namespace["motion_mode"])
+        self.assertEqual(self.namespace["game"].score, 0)
+
+    def test_motion_input_pause_resume_and_orientation_recenter(self):
+        self.start()
+        self.frame(pressed=("SELECT",))
+        game = self.namespace["game"]
+        game.move = Mock(return_value="moved")
+        for _ in range(20):
+            self.frame()
+        game.move.assert_not_called()
+        self.imu = (6500, 0, -15000, 0, 0, 0)
+        for _ in range(30):
+            self.frame()
+        self.assertTrue(game.move.called)
+        self.assertTrue(all(call.args == (1, 0)
+                            for call in game.move.call_args_list))
+        self.frame(pressed=("MENU",))
+        game.move.reset_mock()
+        for _ in range(20):
+            self.frame()
+        game.move.assert_not_called()
+        self.frame(pressed=("BACK",))
+        for _ in range(20):
+            self.frame()
+        game.move.assert_not_called()
+        self.upside_down = True
+        self.frame()
+        game.move.assert_not_called()
+        self.assertTrue(self.namespace["tilt"].orientation)
 
     def test_fog_never_draws_remote_terrain_or_items(self):
         self.start()
@@ -286,7 +388,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_bottom_text_keeps_three_pixel_font_bounds_clearance(self):
         labels = ("SELECT: BEGIN", "FIND THE KEY", "FIND THE DOOR",
-                  "KEY FOUND!", "NEED THE KEY", "WAY FOUND!", "A NEW WORLD")
+                  "KEY +1000", "NEED THE KEY", "DOOR +1000", "DUNGEON WORLD")
         for label in labels:
             for height in (13, 15):
                 self.screen.measure_text.side_effect = (
@@ -306,6 +408,73 @@ class RuntimeTests(unittest.TestCase):
                 label, _, y = call.args
                 self.assertLessEqual(y + 13, self.screen.height - 3,
                                      (state, label, y))
+
+
+class TiltTests(unittest.TestCase):
+    def neutral(self, upside_down=False, reading=(0, 0, -16000)):
+        tilt = maze.TiltControl()
+        tilt.steps(reading, upside_down, 16)
+        for _ in range(20):
+            self.assertEqual(tilt.steps(reading, upside_down, 16), (None, 0))
+        return tilt
+
+    def test_deadzone_and_real_stationary_noise_never_move(self):
+        tilt = self.neutral(reading=(-260, -1300, -16000))
+        for i in range(200):
+            reading = (-260 + (i % 7) * 10, -1300 + (i % 9) * 20,
+                       -16000 + (i % 5) * 30)
+            self.assertEqual(tilt.steps(reading, False, 16), (None, 0))
+        tilt = self.neutral()
+        for _ in range(200):
+            self.assertEqual(tilt.steps((1000, 1000, -16000), False, 16),
+                             (None, 0))
+
+    def test_normalized_axes_and_rotation_mapping(self):
+        for scale in (1, 4):
+            for upside_down in (False, True):
+                for reading, expected in (
+                    ((6500, 0, -15000), (1, 0)),
+                    ((-6500, 0, -15000), (-1, 0)),
+                    ((0, 6500, -15000), (0, 1)),
+                    ((0, -6500, -15000), (0, -1)),
+                ):
+                    tilt = self.neutral(upside_down)
+                    outputs = [tilt.steps(
+                        tuple(value * scale for value in reading),
+                        upside_down, 16) for _ in range(40)]
+                    moved = [direction for direction, count in outputs if count]
+                    self.assertTrue(moved)
+                    if upside_down:
+                        expected = (-expected[0], -expected[1])
+                    self.assertTrue(all(direction == expected for direction in moved))
+
+    def test_dominant_axis_hysteresis_and_bounded_repeat(self):
+        tilt = self.neutral()
+        outputs = [tilt.steps((8000, 4000, -14000), False, 20)
+                   for _ in range(100)]
+        moved = [direction for direction, count in outputs if count]
+        self.assertTrue(all(direction == (1, 0) for direction in moved))
+        self.assertGreater(len(moved), 5)
+        self.assertLess(len(moved), 13)
+        self.assertLessEqual(tilt.steps((8000, 0, -14000), False, 5000)[1], 1)
+        for _ in range(40):
+            result = tilt.steps((0, 0, -16000), False, 20)
+        self.assertEqual(result, (None, 0))
+
+    def test_orientation_change_missing_sensor_and_recenter_do_not_jump(self):
+        tilt = self.neutral()
+        self.assertEqual(tilt.steps((6500, 0, -15000), True, 100), (None, 0))
+        for _ in range(30):
+            self.assertEqual(tilt.steps((6500, 0, -15000), True, 16), (None, 0))
+        self.assertEqual(tilt.steps((0, 0, 0), True, 16), (None, 0))
+        self.assertIsNone(tilt.reference)
+        self.assertEqual(tilt.steps((0, 0, -16000), True, 16), (None, 0))
+
+    def test_pitch_wrap_is_not_a_full_turn(self):
+        tilt = self.neutral(reading=(0, -16000, 20))
+        for _ in range(30):
+            self.assertEqual(tilt.steps((0, -16000, -20), False, 20),
+                             (None, 0))
 
 
 if __name__ == "__main__":

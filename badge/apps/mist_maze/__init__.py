@@ -5,7 +5,7 @@ APP_DIR = "/system/apps/mist_maze"
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
 
-from maze import Maze, TileRepeat, WIDTH, HEIGHT, THEMES
+from maze import Maze, TileRepeat, TiltControl, WIDTH, HEIGHT, THEMES
 
 badge.mode(LORES | VSYNC)
 screen.font = font.nope
@@ -31,6 +31,8 @@ BUTTONS = ((BUTTON_UP, (0, -1)), (BUTTON_DOWN, (0, 1)),
 
 game = Maze()
 repeat = TileRepeat()
+tilt = TiltControl()
+motion_mode = False
 state = "intro"
 menu_choice = 0
 notice = ""
@@ -118,8 +120,8 @@ def draw_tile(x, y, gx, gy):
 def draw_world():
     left = (screen.width - WIDTH * 8) // 2
     top = 18
-    text("%02d" % game.level, 4, 3, GOLD)
-    centered(THEMES[game.theme], 3, MUTED)
+    text("%02d%s" % (game.level, "T" if motion_mode else "D"), 4, 3, GOLD)
+    centered("S:%d" % game.score, 3, WHITE)
     if game.has_key:
         draw_key(screen.width - 12, 4)
     else:
@@ -152,12 +154,12 @@ def draw_intro():
     centered("Find key. Find door.", 53)
     centered("Only 3 tiles in sight.", 66, MUTED)
     centered("The rest disappears.", 77, MUTED)
-    centered("D-pad: walk", 91)
+    centered("Faster = more points", 91)
     footer("SELECT: BEGIN", GOLD)
 
 
 def update():
-    global state, menu_choice, notice, notice_ms, escape_ms, game
+    global state, menu_choice, notice, notice_ms, escape_ms, game, motion_mode
     elapsed = max(0, badge.ticks_delta)
     box(0, 0, screen.width, screen.height, INK)
     if state == "intro":
@@ -169,7 +171,8 @@ def update():
     if state == "pause":
         centered("TAKE A BREATH", 22, GOLD)
         centered("Nothing is chasing you.", 40, MUTED)
-        centered("D-pad: choose", 56, MUTED)
+        centered("%s / %s" % (
+            THEMES[game.theme], "TILT" if motion_mode else "D-PAD"), 56, MUTED)
         if badge.pressed(BUTTON_UP) or badge.pressed(BUTTON_DOWN):
             menu_choice = 1 - menu_choice
         centered("> CONTINUE" if menu_choice == 0 else "CONTINUE",
@@ -179,49 +182,72 @@ def update():
         if badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_MENU):
             state = "play"
             repeat.reset()
+            tilt.reset()
         elif badge.pressed(BUTTON_SELECT):
             if menu_choice:
                 game = Maze()
                 notice_ms = 0
                 escape_ms = 0
+                motion_mode = False
             state = "play"
             repeat.reset()
+            tilt.reset()
         return
     notice_ms = max(0, notice_ms - elapsed)
     if game.escaped:
         escape_ms -= elapsed
         if escape_ms <= 0:
             game.new_level()
-            notice = "A NEW WORLD"
+            notice = THEMES[game.theme] + " WORLD"
             notice_ms = 1200
             repeat.reset()
+            tilt.reset()
     elif badge.pressed(BUTTON_MENU) or badge.pressed(BUTTON_BACK):
         state = "pause"
         menu_choice = 0
         repeat.reset()
+        tilt.reset()
+    elif badge.pressed(BUTTON_SELECT):
+        game.advance(elapsed)
+        motion_mode = not motion_mode
+        repeat.reset()
+        tilt.reset()
+        if motion_mode:
+            tilt.steps(badge.imu(), badge.upside_down(), 0)
+        notice = "TILT: HOLD STILL" if motion_mode else "D-PAD MODE"
+        notice_ms = 1200
     else:
+        game.advance(elapsed)
         direction = None
         pressed = False
-        for button, delta in BUTTONS:
-            if badge.pressed(button):
-                direction = delta
-                pressed = True
-                break
-        if direction is None:
+        if motion_mode:
+            direction, count = tilt.steps(
+                badge.imu(), badge.upside_down(), elapsed)
+            if tilt.reference is None:
+                notice, notice_ms = "WAIT FOR IMU", 100
+        else:
             for button, delta in BUTTONS:
-                if badge.held(button):
+                if badge.pressed(button):
                     direction = delta
+                    pressed = True
                     break
-        for _ in range(repeat.steps(direction, elapsed, pressed)):
+            if direction is None:
+                for button, delta in BUTTONS:
+                    if badge.held(button):
+                        direction = delta
+                        break
+            count = repeat.steps(direction, elapsed, pressed)
+        for _ in range(count):
             result = game.move(*direction)
             if result == "key":
-                notice, notice_ms = "KEY FOUND!", 1200
+                notice, notice_ms = "KEY +%d" % game.key_bonus, 1200
+                break
             elif result == "locked":
                 notice, notice_ms = "NEED THE KEY", 900
                 break
             elif result == "escape":
-                notice, notice_ms = "WAY FOUND!", 700
-                escape_ms = 700
+                notice, notice_ms = "DOOR +%d" % game.door_bonus, 1200
+                escape_ms = 1200
                 break
             elif result == "blocked":
                 break

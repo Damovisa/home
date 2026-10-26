@@ -1,6 +1,7 @@
 """Connected mazes and frame-rate-independent tile input."""
 
 import random
+import math
 
 WIDTH = 19
 HEIGHT = 11
@@ -9,9 +10,14 @@ DIRECTIONS = ((0, -1), (0, 1), (-1, 0), (1, 0))
 THEMES = ("FOREST", "DUNGEON", "OCEAN")
 
 
+def speed_bonus(elapsed_ms):
+    return 10000000 // (10000 + max(0, elapsed_ms))
+
+
 class Maze:
     def __init__(self):
         self.level = 0
+        self.score = 0
         self.theme = random.randrange(len(THEMES))
         self.new_level()
 
@@ -61,6 +67,13 @@ class Maze:
                     break
         self.has_key = False
         self.escaped = False
+        self.stage_ms = 0
+        self.key_bonus = 0
+        self.door_bonus = 0
+
+    def advance(self, elapsed_ms):
+        if not self.escaped:
+            self.stage_ms += max(0, elapsed_ms)
 
     def farthest(self, origin, excluded, candidates=None):
         queue = [origin]
@@ -98,9 +111,14 @@ class Maze:
         self.player = target
         if target == self.key and not self.has_key:
             self.has_key = True
+            self.key_bonus = speed_bonus(self.stage_ms)
+            self.score += self.key_bonus
+            self.stage_ms = 0
             return "key"
         if target == self.door:
             self.escaped = True
+            self.door_bonus = speed_bonus(self.stage_ms)
+            self.score += self.door_bonus
             return "escape"
         return "moved"
 
@@ -109,7 +127,9 @@ class TileRepeat:
     DELAY = 260
     INTERVAL = 120
 
-    def __init__(self):
+    def __init__(self, delay=DELAY, interval=INTERVAL):
+        self.delay = delay
+        self.interval = interval
         self.reset()
 
     def reset(self):
@@ -128,11 +148,68 @@ class TileRepeat:
             return 0
         if pressed or direction != self.direction:
             self.direction = direction
-            self.remaining = self.DELAY
+            self.remaining = self.delay
             return 1
         self.remaining -= max(0, min(elapsed, 500))
         count = 0
         while self.remaining <= 0 and count < 4:
             count += 1
-            self.remaining += self.INTERVAL
+            self.remaining += self.interval
         return count
+
+
+class TiltControl:
+    DEAD_ZONE = 0.18
+    RELEASE_ZONE = 0.12
+    SMOOTH_MS = 90
+    SETTLE_MS = 200
+
+    def __init__(self):
+        self.repeat = TileRepeat(320, 180)
+        self.reset()
+
+    def reset(self):
+        self.reference = None
+        self.orientation = None
+        self.x = self.y = 0.0
+        self.settle_ms = self.SETTLE_MS
+        self.repeat.reset()
+
+    def steps(self, reading, upside_down, elapsed_ms):
+        ax, ay, az = reading[:3]
+        magnitude = math.sqrt(ax * ax + ay * ay + az * az)
+        if not magnitude:
+            self.reset()
+            return None, 0
+        # Same normalized roll/pitch convention as Mona Paint, independent
+        # of the firmware's raw acceleration scale.
+        side = math.asin(max(-1.0, min(1.0, ax / magnitude)))
+        fore = math.atan2(az, ay)
+        if self.reference is None or self.orientation != upside_down:
+            self.reset()
+            self.reference = (side, fore)
+            self.orientation = upside_down
+            self.repeat.steps(None, 0)
+            return None, 0
+        sign = -1 if upside_down else 1
+        target_x = (side - self.reference[0]) * sign
+        target_y = ((fore - self.reference[1] + math.pi)
+                    % (2 * math.pi) - math.pi) * sign
+        dt = max(0, min(elapsed_ms, 250))
+        blend = 1 - math.exp(-dt / self.SMOOTH_MS)
+        self.x += (target_x - self.x) * blend
+        self.y += (target_y - self.y) * blend
+        if self.settle_ms > 0:
+            self.settle_ms -= dt
+            return None, 0
+        direction = None
+        if max(abs(self.x), abs(self.y)) >= self.DEAD_ZONE:
+            if abs(self.x) >= abs(self.y):
+                direction = (1 if self.x > 0 else -1, 0)
+            else:
+                direction = (0, 1 if self.y > 0 else -1)
+        elif self.repeat.direction is not None:
+            dx, dy = self.repeat.direction
+            if self.x * dx + self.y * dy >= self.RELEASE_ZONE:
+                direction = self.repeat.direction
+        return direction, min(1, self.repeat.steps(direction, dt))
