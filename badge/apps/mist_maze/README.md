@@ -2,6 +2,8 @@
 
 Mist Maze is an endless pixel-art memory maze with disappearing terrain and randomly changing forest, dungeon, and ocean worlds.
 
+![Mist Maze gameplay with a three-tile visibility radius and live key bonus.](mist_maze_screenshot.png)
+
 Use the logical D-pad to walk one tile at a time; hold a direction to keep
 walking. Find the gold key, then walk into the white-framed door to escape.
 A locked door is impassable until you find the key.
@@ -59,7 +61,7 @@ input logic but does not reproduce physical tilt feel.
 
 No extra hardware, network, or secrets are required. The app targets the
 Universe 2026 firmware and uses its orientation-aware logical controls.
-The bundled `icon.png` is the menu icon; older installed menus may need the
+The bundled 24x24 `icon.png` is the menu icon; older installed menus may need the
 repository's separate custom-icon patch before displaying it.
 
 ## Host checks
