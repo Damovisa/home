@@ -286,7 +286,7 @@ class RuntimeTests(unittest.TestCase):
         self.frame(pressed=(button,), held=(button,))
         self.assertTrue(game.has_key)
         self.assertEqual(self.namespace["notice"],
-                         "KEY +%d" % game.key_bonus)
+                         "KEY BANKED +%d" % game.key_bonus)
         game.has_key = False
         path = route(game, game.player, game.door)
         for step in path[:-1]:
@@ -388,7 +388,8 @@ class RuntimeTests(unittest.TestCase):
 
     def test_bottom_text_keeps_three_pixel_font_bounds_clearance(self):
         labels = ("SELECT: BEGIN", "FIND THE KEY", "FIND THE DOOR",
-                  "KEY +1000", "NEED THE KEY", "DOOR +1000", "DUNGEON WORLD")
+                  "KEY +1000", "NEED THE KEY", "EXIT +1000", "DUNGEON WORLD",
+                  "KEY BANKED +1000", "EXIT BANKED +1000")
         for label in labels:
             for height in (13, 15):
                 self.screen.measure_text.side_effect = (
@@ -408,6 +409,39 @@ class RuntimeTests(unittest.TestCase):
                 label, _, y = call.args
                 self.assertLessEqual(y + 13, self.screen.height - 3,
                                      (state, label, y))
+
+    def test_live_bonus_matches_key_and_exit_awards(self):
+        self.start()
+        game = self.namespace["game"]
+        game.advance(10000)
+        expected = game.available_bonus()
+        self.assertEqual(self.namespace["bonus_label"](), "KEY +%d" % expected)
+        for step in route(game, game.player, game.key, locked=True):
+            game.move(*step)
+        self.assertEqual(game.key_bonus, expected)
+        self.assertEqual(self.namespace["bonus_label"](), "EXIT +1000")
+        game.advance(30000)
+        expected = game.available_bonus()
+        self.assertEqual(self.namespace["bonus_label"](), "EXIT +%d" % expected)
+        for step in route(game, game.player, game.door):
+            game.move(*step)
+        self.assertEqual(game.door_bonus, expected)
+        game.new_level()
+        self.assertEqual(self.namespace["bonus_label"](), "KEY +1000")
+
+    def test_preview_draws_live_and_freezes_while_paused(self):
+        self.start()
+        game = self.namespace["game"]
+        self.frame(ms=10000)
+        label = self.namespace["bonus_label"]()
+        self.screen.text.assert_any_call(
+            label, (160 - len(label) * 5) // 2, 104)
+        self.frame(pressed=("MENU",))
+        self.frame(ms=60000)
+        self.assertEqual(self.namespace["bonus_label"](), label)
+        self.frame(pressed=("BACK",))
+        self.frame(ms=10000)
+        self.assertLess(game.available_bonus(), 500)
 
 
 class TiltTests(unittest.TestCase):

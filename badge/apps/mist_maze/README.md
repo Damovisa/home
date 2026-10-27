@@ -25,10 +25,14 @@ timer starts when a level begins; the door timer starts when you collect the
 key. Each bonus is `floor(1000 * 10 / (10 + seconds))`: for example, 1,000
 points immediately, 500 after 10 seconds, or 250 after 30 seconds. Faster is
 better, but taking longer never subtracts points or ends the game. Fractional
-seconds count, pauses and between-level transitions do not, and there is no
-on-screen countdown.
+seconds count, pauses and between-level transitions do not.
 
-`KEY +...` and `DOOR +...` show each award. Bonuses accumulate across levels;
+The bottom of the screen previews the points available right now: `KEY +...`
+before collecting the key, then `EXIT +...` for the trip to the door. This
+number decreases with active play time, but is not a time limit. Pausing freezes
+it, and collecting the key resets the exit bonus to 1,000. Brief `BANKED`
+messages show the points just earned instead of the preview; the next leg's
+timer still runs during these messages. Bonuses accumulate across levels;
 New Journey resets both the level and the score.
 
 Press Select to begin. Menu or Back pauses and shows Continue / New Journey;

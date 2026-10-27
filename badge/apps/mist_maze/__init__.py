@@ -60,6 +60,11 @@ def footer(label, pen=WHITE):
     centered(label, screen.height - height - 3, pen)
 
 
+def bonus_label():
+    return "%s +%d" % (
+        "EXIT" if game.has_key else "KEY", game.available_bonus())
+
+
 def draw_key(x, y):
     box(x + 1, y + 1, 4, 4, INK)
     box(x + 1, y, 3, 3, GOLD)
@@ -141,8 +146,7 @@ def draw_world():
             if (gx, gy) == game.door:
                 draw_door(x, y)
     draw_player(left + game.player[0] * 8, top + game.player[1] * 8)
-    label = notice if notice_ms > 0 else (
-        "FIND THE DOOR" if game.has_key else "FIND THE KEY")
+    label = notice if notice_ms > 0 else bonus_label()
     footer(label, GOLD if notice_ms > 0 else MUTED)
 
 
@@ -179,6 +183,7 @@ def update():
                  75, GOLD if menu_choice == 0 else WHITE)
         centered("> NEW JOURNEY" if menu_choice == 1 else "NEW JOURNEY",
                  91, GOLD if menu_choice == 1 else WHITE)
+        footer(bonus_label(), MUTED)
         if badge.pressed(BUTTON_BACK) or badge.pressed(BUTTON_MENU):
             state = "play"
             repeat.reset()
@@ -240,13 +245,13 @@ def update():
         for _ in range(count):
             result = game.move(*direction)
             if result == "key":
-                notice, notice_ms = "KEY +%d" % game.key_bonus, 1200
+                notice, notice_ms = "KEY BANKED +%d" % game.key_bonus, 1200
                 break
             elif result == "locked":
                 notice, notice_ms = "NEED THE KEY", 900
                 break
             elif result == "escape":
-                notice, notice_ms = "DOOR +%d" % game.door_bonus, 1200
+                notice, notice_ms = "EXIT BANKED +%d" % game.door_bonus, 1200
                 escape_ms = 1200
                 break
             elif result == "blocked":

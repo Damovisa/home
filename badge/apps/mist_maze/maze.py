@@ -75,6 +75,9 @@ class Maze:
         if not self.escaped:
             self.stage_ms += max(0, elapsed_ms)
 
+    def available_bonus(self):
+        return speed_bonus(self.stage_ms)
+
     def farthest(self, origin, excluded, candidates=None):
         queue = [origin]
         seen = {origin}
@@ -111,13 +114,13 @@ class Maze:
         self.player = target
         if target == self.key and not self.has_key:
             self.has_key = True
-            self.key_bonus = speed_bonus(self.stage_ms)
+            self.key_bonus = self.available_bonus()
             self.score += self.key_bonus
             self.stage_ms = 0
             return "key"
         if target == self.door:
             self.escaped = True
-            self.door_bonus = speed_bonus(self.stage_ms)
+            self.door_bonus = self.available_bonus()
             self.score += self.door_bonus
             return "escape"
         return "moved"
